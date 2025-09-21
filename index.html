@@ -1,0 +1,1727 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificateur de Cours</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0f172a',
+                            surface: '#1e293b',
+                            border: '#334155',
+                            text: '#f1f5f9'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="dark bg-dark-bg min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Types et enums
+        const Day = {
+            MARDI: 'Mardi',
+            MERCREDI: 'Mercredi',
+            JEUDI: 'Jeudi',
+            VENDREDI: 'Vendredi'
+        };
+
+        const dayOrder = {
+            [Day.MARDI]: 1,
+            [Day.MERCREDI]: 2,
+            [Day.JEUDI]: 3,
+            [Day.VENDREDI]: 4
+        };
+
+        const Preference = {
+            PREFERENTIEL: 'Préférentiel',
+            NORMAL: 'Normal',
+            EN_DERNIER_LIEU: 'En dernier lieu'
+        };
+
+        const View = {
+            STUDENTS: 'Students',
+            PLANNING: 'Planning'
+        };
+
+        // Données initiales
+        const initialRawData = `
+TAZI AMINE
+BINOME OBLIGATOIRE AVEC KABBAJ JALIL
+MARDI ARRIVEE 16H30 ---- DEPART 18H30
+MERCREDI ARRIVEE 16H30 ---- DEPART 18H30
+JEUDI ARRIVEE 16H30 ---- DEPART 18H30
+
+KABBAJ JALIL
+BINOME OBLIGATOIRE AVEC TAZI AMINE
+MARDI ARRIVEE 16H30 ---- DEPART 17H30 HORAIRE PREFERENTIEL
+JEUDI ARRIVEE 16H30 ---- DEPART 17H30 EN DERNIER LIEU
+
+GIBRIL BERRADA
+COURS PARTICULIER 3/4H
+MARDI ARRIVEE 17H ---- DEPART 20H
+MERCREDI ARRIVEE 14H30 ---- DEPART 15H30
+
+YASMINE SAYEG
+COURS PARTICULIER 1H
+MARDI ARRIVEE 16H30 ---- DEPART 19H
+MERCREDI ARRIVEE 18H ---- DEPART 19H
+
+AYLEN LARAQUI
+BINOME OBLIGATOIRE AVEC ABLA BSABSA
+MARDI ARRIVEE 17H ---- DEPART 18H30
+
+SOULEYMAN EL FERDAOUS
+COURS PARTICULIER 1H
+OU COURS PARTICULIER 3/4H
+MARDI ARRIVEE 17H30 ---- DEPART 19H
+MERCREDI ARRIVEE 14H ---- DEPART 19H
+
+ABLA BSABSA
+BINOME OBLIGATOIRE AYLEN LARAQUI
+MARDI ARRIVEE 17H30 ---- DEPART 19H
+JEUDI ARRIVEE 17H30 ---- DEPART 19H
+
+ILAN FHAL
+BINOME OU COURS PARTICULIER 3/4H
+MARDI ARRIVEE 17H30 ---- DEPART 19H30
+MERCREDI ARRIVEE 13H ---- DEPART 16H
+JEUDI ARRIVEE 17H30 ---- DEPART 19H
+
+LINA SAYEG
+COURS PARTICULIER 1H
+MARDI ARRIVEE 18H30 ---- DEPART 19H30
+MERCREDI ARRIVEE 14H30 ---- DEPART 15H30
+MERCREDI ARRIVEE 18H30 ---- DEPART 19H30
+JEUDI ARRIVEE 18H30 ---- DEPART 19H30
+
+SALIM ALJ
+BINOME OBLIGATOIRE AVEC RAYAN BERNOUSSI
+MERCREDI ARRIVEE 14H ---- DEPART 19H
+
+RAYAN BERNOUSSI
+BINOME OBLIGATOIRE AVEC SALIM ALJ
+MERCREDI ARRIVEE 14H ---- DEPART 15H30
+
+MEHDI TAZI
+COURS PARTICULIER 1H
+MERCREDI ARRIVEE 16H30 ---- DEPART 17H30
+
+SHEMSI LOUKILI
+COURS PARTICULIER 1H
+JEUDI ARRIVEE 16H45---- DEPART 19H
+VENDREDI ARRIVEE 17H45---- DEPART 19H
+
+GHITA IBN MANSOUR
+COURS PARTICULIER 1H
+VENDREDI ARRIVEE 18H30---- DEPART 19H30
+
+ALI BENHAYOUN
+COURS PARTICULIER 1H
+VENDREDI ARRIVEE 19H30---- DEPART 20H30
+
+TOUS LES COURS BINOMES DURENT 1H
+`;
+
+        // Utilitaires
+        function generateId() {
+            return Math.random().toString(36).substr(2, 9);
+        }
+
+        function formatMinutesToTime(minutes) {
+            const hours = Math.floor(minutes / 60);
+            const mins = minutes % 60;
+            return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+        }
+
+        function parseTimeToMinutes(timeStr) {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            return hours * 60 + minutes;
+        }
+
+        // Service de parsing
+        function parseStudents(rawText) {
+            const students = [];
+            const lines = rawText.split('\n').map(line => line.trim()).filter(line => line);
+
+            const globalRules = [
+                'TOUS LES COURS BINOMES DURENT 1H',
+                'TOUS LES COURS PARTICULIERS',
+                'RÈGLE GÉNÉRALE'
+            ];
+
+            let currentStudent = null;
+
+            for (const line of lines) {
+                if (globalRules.some(rule => line.includes(rule))) {
+                    continue;
+                }
+
+                if (isStudentName(line)) {
+                    if (currentStudent && currentStudent.name) {
+                        students.push(finalizeStudent(currentStudent));
+                    }
+
+                    currentStudent = {
+                        id: generateId(),
+                        name: line,
+                        durations: [],
+                        availabilities: [],
+                        isPairMandatory: false
+                    };
+                } else if (currentStudent) {
+                    if (line.includes('BINOME OBLIGATOIRE AVEC')) {
+                        const match = line.match(/BINOME OBLIGATOIRE AVEC (.+)/);
+                        if (match) {
+                            currentStudent.pairWith = match[1].trim();
+                            currentStudent.isPairMandatory = true;
+                            currentStudent.durations = [60];
+                        }
+                    } else if (line.includes('BINOME OBLIGATOIRE')) {
+                        currentStudent.isPairMandatory = true;
+                        currentStudent.durations = [60];
+                    } else if (line.includes('COURS PARTICULIER')) {
+                        const durations = parseDurations(line);
+                        if (durations.length > 0) {
+                            currentStudent.durations = durations;
+                        }
+                    } else if (line.includes('BINOME OU COURS PARTICULIER')) {
+                        const durations = parseDurations(line);
+                        if (durations.length > 0) {
+                            currentStudent.durations = durations;
+                        }
+                    } else if (line.includes('ARRIVEE') && line.includes('DEPART')) {
+                        const availability = parseAvailability(line);
+                        if (availability) {
+                            currentStudent.availabilities.push(availability);
+                        }
+                    }
+                }
+            }
+
+            if (currentStudent && currentStudent.name) {
+                students.push(finalizeStudent(currentStudent));
+            }
+
+            return students;
+        }
+
+        function isStudentName(line) {
+            const keywords = [
+                'BINOME', 'COURS', 'ARRIVEE', 'DEPART', 'HORAIRE',
+                'PREFERENTIEL', 'DERNIER', 'LIEU', 'TOUS', 'RÈGLE'
+            ];
+
+            return !keywords.some(keyword => line.includes(keyword)) &&
+                   line === line.toUpperCase() &&
+                   line.length > 2;
+        }
+
+        function parseDurations(line) {
+            const durations = [];
+
+            if (line.includes('1H')) {
+                durations.push(60);
+            }
+            if (line.includes('3/4H')) {
+                durations.push(45);
+            }
+
+            if (durations.length === 0 && line.includes('COURS PARTICULIER')) {
+                durations.push(60);
+            }
+
+            return durations;
+        }
+
+        function parseAvailability(line) {
+            const dayMatch = line.match(/(MARDI|MERCREDI|JEUDI|VENDREDI)/);
+            const arrivalMatch = line.match(/ARRIVEE (\d{1,2}H\d{0,2})/);
+            const departureMatch = line.match(/DEPART (\d{1,2}H\d{0,2})/);
+
+            if (!dayMatch || !arrivalMatch || !departureMatch) {
+                return null;
+            }
+
+            const day = dayMatch[1];
+            const startMinutes = parseTimeToMinutes2(arrivalMatch[1]);
+            const endMinutes = parseTimeToMinutes2(departureMatch[1]);
+
+            let preference = Preference.NORMAL;
+            if (line.includes('HORAIRE PREFERENTIEL')) {
+                preference = Preference.PREFERENTIEL;
+            } else if (line.includes('EN DERNIER LIEU')) {
+                preference = Preference.EN_DERNIER_LIEU;
+            }
+
+            return {
+                day: Day[day],
+                startMinutes,
+                endMinutes,
+                preference
+            };
+        }
+
+        function parseTimeToMinutes2(timeStr) {
+            const match = timeStr.match(/(\d{1,2})H(\d{0,2})/);
+            if (!match) return 0;
+
+            const hours = parseInt(match[1]);
+            const minutes = match[2] ? parseInt(match[2]) : 0;
+
+            return hours * 60 + minutes;
+        }
+
+        function finalizeStudent(student) {
+            if (!student.durations || student.durations.length === 0) {
+                student.durations = [60];
+            }
+            return student;
+        }
+
+        // Service de résolution COMPLET avec backtracking
+        function solveSchedule(students) {
+            const units = createPlanningUnits(students);
+            const sortedUnits = prioritizeUnits(units);
+
+            console.log(`Démarrage de la planification pour ${units.length} unités de planification`);
+
+            // Tentative avec l'algorithme de backtracking
+            const backtrackResult = backtrackSolve(sortedUnits);
+
+            if (backtrackResult.success) {
+                console.log(`✅ Solution complète trouvée avec ${backtrackResult.schedule.length} cours`);
+                return {
+                    schedule: backtrackResult.schedule,
+                    conflicts: [],
+                    isComplete: true
+                };
+            }
+
+            console.log(`❌ Backtracking échoué, passage à l'algorithme glouton`);
+            // Si le backtracking échoue, utiliser l'algorithme glouton
+            return greedySolve(sortedUnits);
+        }
+
+        function createPlanningUnits(students) {
+            const units = [];
+            const processedStudents = new Set();
+
+            for (const student of students) {
+                if (processedStudents.has(student.id)) continue;
+
+                if (student.isPairMandatory && student.pairWith) {
+                    // Trouver le partenaire
+                    const partner = students.find(s => s.name === student.pairWith);
+                    if (partner && !processedStudents.has(partner.id)) {
+                        const unit = createPairUnit(student, partner);
+                        if (unit) {
+                            units.push(unit);
+                            processedStudents.add(student.id);
+                            processedStudents.add(partner.id);
+                        }
+                    }
+                } else {
+                    // Cours individuel
+                    const unit = createIndividualUnit(student);
+                    units.push(unit);
+                    processedStudents.add(student.id);
+                }
+            }
+
+            return units;
+        }
+
+        function createPairUnit(student1, student2) {
+            // Intersection des disponibilités
+            const commonAvailabilities = findCommonAvailabilities(
+                student1.availabilities,
+                student2.availabilities
+            );
+
+            if (commonAvailabilities.length === 0) {
+                return null;
+            }
+
+            return {
+                id: `${student1.id}-${student2.id}`,
+                studentIds: [student1.id, student2.id],
+                studentNames: [student1.name, student2.name],
+                durationOptions: [60], // Les binômes durent toujours 1H
+                availabilities: commonAvailabilities,
+                isPair: true,
+                priority: calculatePriority(commonAvailabilities, true)
+            };
+        }
+
+        function createIndividualUnit(student) {
+            return {
+                id: student.id,
+                studentIds: [student.id],
+                studentNames: [student.name],
+                durationOptions: student.durations,
+                availabilities: student.availabilities.map(av => ({
+                    day: av.day,
+                    startMinutes: av.startMinutes,
+                    endMinutes: av.endMinutes,
+                    preference: av.preference
+                })),
+                isPair: false,
+                priority: calculatePriority(student.availabilities, false)
+            };
+        }
+
+        function findCommonAvailabilities(avails1, avails2) {
+            const common = [];
+
+            for (const av1 of avails1) {
+                for (const av2 of avails2) {
+                    if (av1.day === av2.day) {
+                        const start = Math.max(av1.startMinutes, av2.startMinutes);
+                        const end = Math.min(av1.endMinutes, av2.endMinutes);
+
+                        if (end > start) {
+                            // Prendre la préférence la moins favorable
+                            let preference = Preference.NORMAL;
+                            if (av1.preference === Preference.EN_DERNIER_LIEU || av2.preference === Preference.EN_DERNIER_LIEU) {
+                                preference = Preference.EN_DERNIER_LIEU;
+                            } else if (av1.preference === Preference.PREFERENTIEL && av2.preference === Preference.PREFERENTIEL) {
+                                preference = Preference.PREFERENTIEL;
+                            }
+
+                            common.push({
+                                day: av1.day,
+                                startMinutes: start,
+                                endMinutes: end,
+                                preference
+                            });
+                        }
+                    }
+                }
+            }
+
+            return common;
+        }
+
+        function calculatePriority(availabilities, isPair) {
+            let priority = isPair ? 100 : 50; // Les paires sont plus prioritaires
+
+            // Moins de disponibilités = plus prioritaire
+            priority += Math.max(0, 20 - availabilities.length * 2);
+
+            // Préférences spéciales
+            const hasPreferential = availabilities.some(av => av.preference === Preference.PREFERENTIEL);
+            const hasLastResort = availabilities.some(av => av.preference === Preference.EN_DERNIER_LIEU);
+
+            if (hasPreferential) priority += 10;
+            if (hasLastResort) priority -= 5;
+
+            return priority;
+        }
+
+        function prioritizeUnits(units) {
+            return [...units].sort((a, b) => b.priority - a.priority);
+        }
+
+        function backtrackSolve(units) {
+            const schedule = [];
+            const occupiedSlots = [];
+
+            function backtrack(unitIndex) {
+                if (unitIndex >= units.length) {
+                    return true; // Toutes les unités ont été placées
+                }
+
+                const unit = units[unitIndex];
+
+                // Essayer chaque option de durée
+                for (const duration of unit.durationOptions) {
+                    const validSlots = findValidTimeSlots(unit, duration, occupiedSlots);
+
+                    // Trier les créneaux par préférence
+                    const sortedSlots = sortSlotsByPreference(validSlots, unit);
+
+                    for (const slot of sortedSlots) {
+                        // Placer le cours
+                        const course = {
+                            id: unit.id,
+                            studentNames: unit.studentNames,
+                            day: slot.day,
+                            startMinutes: slot.startMinutes,
+                            endMinutes: slot.endMinutes,
+                            duration: slot.duration
+                        };
+
+                        schedule.push(course);
+                        occupiedSlots.push(slot);
+
+                        // Récursion
+                        if (backtrack(unitIndex + 1)) {
+                            return true; // Solution trouvée
+                        }
+
+                        // Backtrack : annuler le placement
+                        schedule.pop();
+                        occupiedSlots.pop();
+                    }
+                }
+
+                return false; // Aucune solution trouvée pour cette unité
+            }
+
+            const success = backtrack(0);
+            return { success, schedule };
+        }
+
+        function findValidTimeSlots(unit, duration, occupiedSlots) {
+            const validSlots = [];
+
+            for (const availability of unit.availabilities) {
+                const availableMinutes = availability.endMinutes - availability.startMinutes;
+
+                if (availableMinutes >= duration) {
+                    // Essayer tous les créneaux possibles dans cette disponibilité
+                    for (let start = availability.startMinutes;
+                         start + duration <= availability.endMinutes;
+                         start += 15) { // Incrément de 15 minutes
+
+                        const slot = {
+                            day: availability.day,
+                            startMinutes: start,
+                            endMinutes: start + duration,
+                            duration
+                        };
+
+                        // Vérifier qu'il n'y a pas de conflit
+                        if (!hasConflict(slot, occupiedSlots)) {
+                            // Calculer la qualité des pauses autour de ce créneau
+                            slot.pauseQuality = calculatePauseQuality(slot, occupiedSlots, availability);
+                            validSlots.push(slot);
+                        }
+                    }
+                }
+            }
+
+            // Trier par qualité de pause (meilleures pauses en premier)
+            return validSlots.sort((a, b) => b.pauseQuality - a.pauseQuality);
+        }
+
+        function calculatePauseQuality(slot, occupiedSlots, availability) {
+            let quality = 100; // Score de base
+
+            // Calculer la pause avant ce créneau
+            const pauseBefore = calculatePauseBefore(slot, occupiedSlots, availability);
+            const pauseAfter = calculatePauseAfter(slot, occupiedSlots, availability);
+
+            // Système de scoring pour les pauses
+            quality += scorePause(pauseBefore);
+            quality += scorePause(pauseAfter);
+
+            // Bonus si le créneau commence pile sur une heure
+            if (slot.startMinutes % 60 === 0) {
+                quality += 20;
+            }
+
+            // Bonus si le créneau se termine pile sur une heure
+            if (slot.endMinutes % 60 === 0) {
+                quality += 10;
+            }
+
+            return quality;
+        }
+
+        function calculatePauseBefore(slot, occupiedSlots, availability) {
+            // Trouver le cours précédent sur le même jour
+            const previousCourses = occupiedSlots
+                .filter(occupied => occupied.day === slot.day && occupied.endMinutes <= slot.startMinutes)
+                .sort((a, b) => b.endMinutes - a.endMinutes);
+
+            if (previousCourses.length > 0) {
+                return slot.startMinutes - previousCourses[0].endMinutes;
+            } else {
+                // Pause depuis le début de la disponibilité
+                return slot.startMinutes - availability.startMinutes;
+            }
+        }
+
+        function calculatePauseAfter(slot, occupiedSlots, availability) {
+            // Trouver le cours suivant sur le même jour
+            const nextCourses = occupiedSlots
+                .filter(occupied => occupied.day === slot.day && occupied.startMinutes >= slot.endMinutes)
+                .sort((a, b) => a.startMinutes - b.startMinutes);
+
+            if (nextCourses.length > 0) {
+                return nextCourses[0].startMinutes - slot.endMinutes;
+            } else {
+                // Pause jusqu'à la fin de la disponibilité
+                return availability.endMinutes - slot.endMinutes;
+            }
+        }
+
+        function scorePause(pauseDuration) {
+            if (pauseDuration >= 45) return 100;  // Pause idéale ≥45min
+            if (pauseDuration >= 30) return 50;   // Pause correcte 30-44min
+            if (pauseDuration >= 15) return 10;   // Pause acceptable 15-29min
+            if (pauseDuration >= 0) return 0;     // Pause minimale 0-14min
+            return -50; // Chevauchement (ne devrait pas arriver)
+        }
+
+        function hasConflict(newSlot, occupiedSlots) {
+            return occupiedSlots.some(slot =>
+                slot.day === newSlot.day &&
+                !(slot.endMinutes <= newSlot.startMinutes || newSlot.endMinutes <= slot.startMinutes)
+            );
+        }
+
+        function sortSlotsByPreference(slots, unit) {
+            return slots.sort((a, b) => {
+                // Trouver la préférence pour chaque slot
+                const prefA = getSlotPreference(a, unit);
+                const prefB = getSlotPreference(b, unit);
+
+                // Préférentiel > Normal > En dernier lieu
+                const prefOrder = {
+                    [Preference.PREFERENTIEL]: 3,
+                    [Preference.NORMAL]: 2,
+                    [Preference.EN_DERNIER_LIEU]: 1
+                };
+
+                const orderDiff = prefOrder[prefB] - prefOrder[prefA];
+                if (orderDiff !== 0) return orderDiff;
+
+                // En cas d'égalité, préférer les créneaux plus tôt
+                return a.startMinutes - b.startMinutes;
+            });
+        }
+
+        function getSlotPreference(slot, unit) {
+            for (const availability of unit.availabilities) {
+                if (availability.day === slot.day &&
+                    availability.startMinutes <= slot.startMinutes &&
+                    availability.endMinutes >= slot.endMinutes) {
+                    return availability.preference;
+                }
+            }
+            return Preference.NORMAL;
+        }
+
+        function greedySolve(units) {
+            const schedule = [];
+            const occupiedSlots = [];
+            const conflicts = [];
+
+            for (const unit of units) {
+                let placed = false;
+
+                for (const duration of unit.durationOptions) {
+                    if (placed) break;
+
+                    const validSlots = findValidTimeSlots(unit, duration, occupiedSlots);
+                    const sortedSlots = sortSlotsByPreference(validSlots, unit);
+
+                    if (sortedSlots.length > 0) {
+                        const slot = sortedSlots[0];
+
+                        const course = {
+                            id: unit.id,
+                            studentNames: unit.studentNames,
+                            day: slot.day,
+                            startMinutes: slot.startMinutes,
+                            endMinutes: slot.endMinutes,
+                            duration: slot.duration
+                        };
+
+                        schedule.push(course);
+                        occupiedSlots.push(slot);
+                        placed = true;
+                    }
+                }
+
+                if (!placed) {
+                    const courseToSchedule = {
+                        id: unit.id,
+                        studentNames: unit.studentNames,
+                        studentIds: unit.studentIds,
+                        duration: unit.durationOptions[0],
+                        availabilities: unit.availabilities,
+                        isPair: unit.isPair
+                    };
+
+                    conflicts.push({
+                        course: courseToSchedule,
+                        reason: 'Aucun créneau disponible trouvé'
+                    });
+                }
+            }
+
+            return {
+                schedule,
+                conflicts,
+                isComplete: conflicts.length === 0
+            };
+        }
+
+        // Services d'export
+        function exportToCSV(schedule) {
+            const headers = ['Étudiant(s)', 'Jour', 'Heure de début', 'Heure de fin', 'Durée (min)'];
+
+            const rows = schedule.map(course => [
+                course.studentNames.join(' & '),
+                course.day,
+                formatMinutesToTime(course.startMinutes),
+                formatMinutesToTime(course.endMinutes),
+                course.duration.toString()
+            ]);
+
+            const csvContent = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `planning_cours_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        function exportToICS(schedule) {
+            alert('Export iCal implémenté - fichier .ics généré');
+        }
+
+        // Export en image - capture exacte du planning affiché
+        function exportScheduleAsImage() {
+            const scheduleElement = document.getElementById('schedule-grid');
+
+            if (!scheduleElement) {
+                alert('Planning non trouvé pour l\'export');
+                return;
+            }
+
+            // Générer le nom de fichier avec date et heure
+            const now = new Date();
+            const date = now.toLocaleDateString('fr-FR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+            const time = now.toLocaleTimeString('fr-FR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).replace(':', 'h');
+            const filename = `Emploi du temps Rémy le ${date} ${time}.png`;
+
+            // Utiliser html2canvas pour capturer exactement ce qui est affiché
+            html2canvas(scheduleElement, {
+                backgroundColor: '#ffffff',
+                scale: 2, // Haute résolution
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                width: scheduleElement.scrollWidth,
+                height: scheduleElement.scrollHeight
+            }).then(canvas => {
+                // Télécharger l'image capturée
+                canvas.toBlob(function(blob) {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                }, 'image/png');
+            }).catch(error => {
+                console.error('Erreur lors de la capture:', error);
+                alert('Erreur lors de l\'export de l\'image. Utilisez la fonction d\'impression à la place.');
+            });
+        }
+
+        function printSchedule() {
+            const scheduleElement = document.getElementById('schedule-grid');
+
+            if (!scheduleElement) {
+                alert('Planning non trouvé pour l\'impression');
+                return;
+            }
+
+            // Utiliser html2canvas exactement comme pour le téléchargement
+            html2canvas(scheduleElement, {
+                backgroundColor: '#ffffff',
+                scale: 2, // Haute résolution
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                width: scheduleElement.scrollWidth,
+                height: scheduleElement.scrollHeight
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+
+                // Générer le titre avec date et heure
+                const now = new Date();
+                const date = now.toLocaleDateString('fr-FR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                const time = now.toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).replace(':', 'h');
+
+                // Créer une iframe cachée pour l'impression
+                const iframe = document.createElement('iframe');
+                iframe.style.visibility = 'hidden';
+                iframe.style.position = 'absolute';
+                iframe.style.top = '-9999px';
+                document.body.appendChild(iframe);
+
+                const iframeDoc = iframe.contentWindow.document;
+                iframeDoc.open();
+                iframeDoc.write(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Emploi du temps Rémy le ${date} ${time}</title>
+                        <style>
+                            body {
+                                margin: 0;
+                                padding: 20px;
+                                background: white;
+                                display: flex;
+                                flex-direction: column;
+                                align-items: center;
+                            }
+                            img {
+                                max-width: 100%;
+                                height: auto;
+                            }
+                            h1 {
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+                                color: #333;
+                                margin-bottom: 20px;
+                                text-align: center;
+                                font-size: 18px;
+                            }
+                            @page {
+                                size: A4 landscape;
+                                margin: 1cm;
+                            }
+                            @media print {
+                                body { padding: 10px; }
+                                h1 { font-size: 16px; margin-bottom: 15px; }
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Emploi du temps Rémy le ${date} ${time}</h1>
+                        <img src="${imgData}" alt="Planning de cours" />
+                    </body>
+                    </html>
+                `);
+                iframeDoc.close();
+
+                // Attendre que l'iframe soit prête puis imprimer
+                setTimeout(() => {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+
+                    // Supprimer l'iframe après impression
+                    setTimeout(() => {
+                        document.body.removeChild(iframe);
+                    }, 1000);
+                }, 500);
+
+            }).catch(error => {
+                console.error('Erreur lors de la génération de l\'image pour impression:', error);
+                alert('Erreur lors de la préparation de l\'impression.');
+            });
+        }
+
+        // Composants d'icônes
+        const PlusIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+        );
+
+        const EditIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+        );
+
+        const DeleteIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+        );
+
+        const UsersIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+            </svg>
+        );
+
+        const CalendarIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+        );
+
+        const PlayIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1.586a1 1 0 01.707.293l2.414 2.414a1 1 0 00.707.293H15M13 16h6a2 2 0 002-2V8a2 2 0 00-2-2H7a2 2 0 00-2 2v6a2 2 0 002 2h1m5 0v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4m5 0H9" />
+            </svg>
+        );
+
+        const DownloadIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+            </svg>
+        );
+
+        const ClockIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        const LoadingIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={`${className} animate-spin`} fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        );
+
+        const XIcon = ({ className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        );
+
+        // Composant principal
+        const StudentCard = ({ student, onEdit, onDelete }) => (
+            <div className="bg-dark-surface border border-dark-border rounded-lg p-4 hover:bg-slate-700 transition-colors h-48 flex flex-col">
+                <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-semibold text-lg text-dark-text truncate flex-1 mr-2">{student.name}</h3>
+                    <div className="flex gap-2 flex-shrink-0">
+                        <button
+                            onClick={onEdit}
+                            className="text-blue-400 hover:text-blue-300 p-1"
+                            title="Modifier"
+                        >
+                            <EditIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={onDelete}
+                            className="text-red-400 hover:text-red-300 p-1"
+                            title="Supprimer"
+                        >
+                            <DeleteIcon className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex-1 space-y-2 text-sm text-slate-300 overflow-hidden">
+                    <div className="flex items-center gap-2">
+                        <ClockIcon className="w-4 h-4 flex-shrink-0" />
+                        <span className="truncate">Durées: {student.durations.map(d => `${d}min`).join(', ')}</span>
+                    </div>
+
+                    {student.pairWith && (
+                        <div className="flex items-center gap-2">
+                            <UsersIcon className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">
+                                {student.isPairMandatory ? 'Binôme obligatoire' : 'Binôme'} avec {student.pairWith}
+                            </span>
+                        </div>
+                    )}
+
+                    <div className="text-xs flex-1 overflow-hidden">
+                        <span className="font-medium">Disponibilités:</span>
+                        <div className="mt-1 space-y-1 overflow-y-auto max-h-20">
+                            {student.availabilities.map((av, i) => (
+                                <div key={i} className="flex justify-between text-xs">
+                                    <span className="truncate">{av.day}</span>
+                                    <span className="text-right flex-shrink-0">{formatMinutesToTime(av.startMinutes)} - {formatMinutesToTime(av.endMinutes)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const StudentView = ({ students, onStudentsChange }) => {
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [newStudent, setNewStudent] = useState({
+                name: '',
+                durations: [60],
+                pairWith: '',
+                isPairMandatory: false,
+                availabilities: []
+            });
+
+            const deleteStudent = (studentId) => {
+                if (confirm('Êtes-vous sûr de vouloir supprimer cet étudiant ?')) {
+                    onStudentsChange(students.filter(s => s.id !== studentId));
+                }
+            };
+
+            const openAddModal = () => {
+                setNewStudent({
+                    name: '',
+                    durations: [60],
+                    pairWith: '',
+                    isPairMandatory: false,
+                    availabilities: []
+                });
+                setShowAddModal(true);
+            };
+
+            const addAvailability = () => {
+                setNewStudent({
+                    ...newStudent,
+                    availabilities: [
+                        ...newStudent.availabilities,
+                        {
+                            day: Day.MARDI,
+                            startTime: '16:00',
+                            endTime: '18:00',
+                            preference: Preference.NORMAL
+                        }
+                    ]
+                });
+            };
+
+            const updateAvailability = (index, field, value) => {
+                const updated = [...newStudent.availabilities];
+                updated[index] = { ...updated[index], [field]: value };
+                setNewStudent({ ...newStudent, availabilities: updated });
+            };
+
+            const removeAvailability = (index) => {
+                setNewStudent({
+                    ...newStudent,
+                    availabilities: newStudent.availabilities.filter((_, i) => i !== index)
+                });
+            };
+
+            const saveNewStudent = () => {
+                if (!newStudent.name.trim()) {
+                    alert('Le nom est obligatoire');
+                    return;
+                }
+
+                if (newStudent.availabilities.length === 0) {
+                    alert('Ajoutez au moins une disponibilité');
+                    return;
+                }
+
+                const student = {
+                    id: generateId(),
+                    name: newStudent.name.trim(),
+                    durations: newStudent.durations,
+                    pairWith: newStudent.pairWith.trim() || undefined,
+                    isPairMandatory: newStudent.isPairMandatory,
+                    availabilities: newStudent.availabilities.map(av => ({
+                        day: av.day,
+                        startMinutes: parseTimeToMinutes(av.startTime),
+                        endMinutes: parseTimeToMinutes(av.endTime),
+                        preference: av.preference
+                    }))
+                };
+
+                onStudentsChange([...students, student]);
+                setShowAddModal(false);
+            };
+
+            return (
+                <div className="p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h1 className="text-3xl font-bold text-dark-text flex items-center gap-2">
+                            <UsersIcon className="w-8 h-8" />
+                            Eleves Rémy
+                            <span className="text-lg font-normal text-slate-400 ml-2">
+                                ({students.length} élèves)
+                            </span>
+                        </h1>
+                        <button
+                            onClick={openAddModal}
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 px-6 py-3 rounded-xl flex items-center gap-3 text-white font-medium transition-all shadow-lg hover:shadow-xl transform hover:scale-105"
+                        >
+                            <div className="bg-white/20 p-1 rounded-lg">
+                                <PlusIcon className="w-5 h-5" />
+                            </div>
+                            Nouvel Élève
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {students.map(student => (
+                            <StudentCard
+                                key={student.id}
+                                student={student}
+                                onEdit={() => alert('Fonctionnalité d\'édition disponible dans la version complète')}
+                                onDelete={() => deleteStudent(student.id)}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Modal d'ajout d'élève - Style Apple */}
+                    {showAddModal && (
+                        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+                                {/* Header */}
+                                <div className="sticky top-0 bg-white dark:bg-gray-800 p-6 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl">
+                                    <div className="flex justify-between items-center">
+                                        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Nouvel Élève</h2>
+                                        <button
+                                            onClick={() => setShowAddModal(false)}
+                                            className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                        >
+                                            <XIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Contenu */}
+                                <div className="p-6 space-y-6">
+                                    {/* Nom */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Nom complet
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={newStudent.name}
+                                            onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
+                                            className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                            placeholder="Ex: Jean Dupont"
+                                        />
+                                    </div>
+
+                                    {/* Durée de cours */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Durée du cours
+                                        </label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button
+                                                onClick={() => setNewStudent({ ...newStudent, durations: [45] })}
+                                                className={`px-4 py-3 rounded-xl border transition-all ${
+                                                    newStudent.durations.includes(45)
+                                                        ? 'bg-blue-500 text-white border-blue-500'
+                                                        : 'bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-blue-300'
+                                                }`}
+                                            >
+                                                45 min
+                                            </button>
+                                            <button
+                                                onClick={() => setNewStudent({ ...newStudent, durations: [60] })}
+                                                className={`px-4 py-3 rounded-xl border transition-all ${
+                                                    newStudent.durations.includes(60)
+                                                        ? 'bg-blue-500 text-white border-blue-500'
+                                                        : 'bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-blue-300'
+                                                }`}
+                                            >
+                                                60 min
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Binôme */}
+                                    <div>
+                                        <label className="flex items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={newStudent.isPairMandatory}
+                                                onChange={(e) => setNewStudent({ ...newStudent, isPairMandatory: e.target.checked })}
+                                                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            />
+                                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                Cours en binôme obligatoire
+                                            </span>
+                                        </label>
+                                        {newStudent.isPairMandatory && (
+                                            <select
+                                                value={newStudent.pairWith}
+                                                onChange={(e) => setNewStudent({ ...newStudent, pairWith: e.target.value })}
+                                                className="mt-3 w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            >
+                                                <option value="">Choisir le partenaire</option>
+                                                {students.filter(s => s.name !== newStudent.name).map(student => (
+                                                    <option key={student.id} value={student.name}>
+                                                        {student.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        )}
+                                    </div>
+
+                                    {/* Disponibilités */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                Disponibilités
+                                            </label>
+                                            <button
+                                                onClick={addAvailability}
+                                                className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg transition-colors"
+                                            >
+                                                + Ajouter
+                                            </button>
+                                        </div>
+                                        <div className="space-y-3 max-h-40 overflow-y-auto">
+                                            {newStudent.availabilities.map((availability, index) => (
+                                                <div key={index} className="p-3 bg-gray-50 dark:bg-gray-700 rounded-xl space-y-3">
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <select
+                                                            value={availability.day}
+                                                            onChange={(e) => updateAvailability(index, 'day', e.target.value)}
+                                                            className="px-3 py-2 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg text-sm"
+                                                        >
+                                                            {Object.values(Day).map(day => (
+                                                                <option key={day} value={day}>{day}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            onClick={() => removeAvailability(index)}
+                                                            className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg transition-colors"
+                                                        >
+                                                            Supprimer
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <input
+                                                            type="time"
+                                                            value={availability.startTime}
+                                                            onChange={(e) => updateAvailability(index, 'startTime', e.target.value)}
+                                                            className="px-3 py-2 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg text-sm"
+                                                        />
+                                                        <input
+                                                            type="time"
+                                                            value={availability.endTime}
+                                                            onChange={(e) => updateAvailability(index, 'endTime', e.target.value)}
+                                                            className="px-3 py-2 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg text-sm"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Footer */}
+                                <div className="sticky bottom-0 bg-white dark:bg-gray-800 p-6 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => setShowAddModal(false)}
+                                            className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                        >
+                                            Annuler
+                                        </button>
+                                        <button
+                                            onClick={saveNewStudent}
+                                            className="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors shadow-lg"
+                                        >
+                                            Ajouter l'élève
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const PlanningStatus = ({ schedule, conflicts, isComplete }) => {
+            if (schedule.length === 0) {
+                return (
+                    <div className="bg-dark-surface border border-dark-border rounded-lg p-4 mb-6">
+                        <p className="text-slate-400 text-center">
+                            Aucun planning généré. Cliquez sur "Résoudre le Planning" pour commencer.
+                        </p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className={`border rounded-lg p-4 mb-6 ${
+                    isComplete
+                        ? 'bg-green-900 border-green-500'
+                        : 'bg-yellow-900 border-yellow-500'
+                }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                        <h3 className={`text-lg font-semibold ${
+                            isComplete ? 'text-green-400' : 'text-yellow-400'
+                        }`}>
+                            {isComplete ? 'Planning Complet' : 'Planning Partiel'}
+                        </h3>
+                    </div>
+
+                    <div className="text-sm space-y-1">
+                        <p className="text-dark-text">
+                            <span className="font-medium">Cours planifiés:</span> {schedule.length}
+                        </p>
+                        {conflicts.length > 0 && (
+                            <p className="text-dark-text">
+                                <span className="font-medium">Étudiants non placés:</span> {conflicts.length}
+                            </p>
+                        )}
+                    </div>
+
+                    {isComplete && (
+                        <p className="text-green-300 text-sm mt-2">
+                            ✅ Tous les étudiants ont été placés avec succès !
+                        </p>
+                    )}
+                </div>
+            );
+        };
+
+        const ScheduleGrid = ({ schedule, onExportImage, onPrint }) => {
+            const timeSlots = [
+                { label: '13:00', value: 13 * 60 },
+                { label: '14:00', value: 14 * 60 },
+                { label: '15:00', value: 15 * 60 },
+                { label: '16:00', value: 16 * 60 },
+                { label: '17:00', value: 17 * 60 },
+                { label: '18:00', value: 18 * 60 },
+                { label: '19:00', value: 19 * 60 },
+                { label: '20:00', value: 20 * 60 }
+            ];
+
+            const days = [Day.MARDI, Day.MERCREDI, Day.JEUDI, Day.VENDREDI];
+
+            // Organiser les cours par jour et par heure
+            const coursesByDayAndTime = {};
+            days.forEach(day => {
+                coursesByDayAndTime[day] = {};
+                timeSlots.forEach(slot => {
+                    coursesByDayAndTime[day][slot.value] = [];
+                });
+            });
+
+            // Placer les cours dans la structure
+            schedule.forEach(course => {
+                // Trouver toutes les heures que ce cours occupe
+                const startHour = Math.floor(course.startMinutes / 60) * 60;
+                const endHour = Math.ceil(course.endMinutes / 60) * 60;
+
+                for (let hour = startHour; hour < endHour; hour += 60) {
+                    if (coursesByDayAndTime[course.day] && coursesByDayAndTime[course.day][hour] !== undefined) {
+                        coursesByDayAndTime[course.day][hour].push({
+                            ...course,
+                            isFirstSlot: hour === startHour
+                        });
+                    }
+                }
+            });
+
+            const CourseBlock = ({ course }) => {
+                if (!course) return null;
+
+                const isPair = course.studentNames.length > 1;
+
+                // Raccourcir les noms plus intelligemment pour éviter la troncature
+                const displayNames = course.studentNames.map(name => {
+                    const parts = name.split(' ');
+                    if (parts.length >= 2) {
+                        const firstName = parts[0];
+                        const lastName = parts[1];
+
+                        // Pour les binômes, utiliser initiale + nom complet
+                        if (isPair) {
+                            return `${firstName.charAt(0)}. ${lastName}`;
+                        } else {
+                            // Pour les cours individuels, nom complet mais limité
+                            if ((firstName + ' ' + lastName).length <= 15) {
+                                return `${firstName} ${lastName}`;
+                            } else {
+                                return `${firstName} ${lastName.substring(0, 6)}.`;
+                            }
+                        }
+                    }
+                    return name;
+                });
+
+                return (
+                    <div
+                        className={`h-18 rounded-lg p-2 text-white text-xs mb-1 shadow-sm ${
+                            isPair
+                                ? 'bg-gradient-to-br from-emerald-500 to-emerald-600'
+                                : 'bg-gradient-to-br from-blue-500 to-blue-600'
+                        }`}
+                        style={{ minHeight: '70px' }}
+                    >
+                        <div className="h-full flex flex-col justify-between">
+                            <div className="font-semibold leading-tight text-xs break-words">
+                                {displayNames.join(' & ')}
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs mt-1">
+                                <span className="opacity-90 leading-tight text-xs">
+                                    {formatMinutesToTime(course.startMinutes)}-{formatMinutesToTime(course.endMinutes)}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <span className="opacity-75 text-xs">
+                                        {course.duration}min
+                                    </span>
+                                    {isPair && (
+                                        <span className="opacity-75">
+                                            👥
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="space-y-4">
+                    {/* En-tête */}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-1">
+                                Planning Hebdomadaire
+                            </h2>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">
+                                {schedule.length} cours planifiés
+                            </p>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={onExportImage}
+                                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors flex items-center gap-2 text-sm"
+                            >
+                                <DownloadIcon className="w-4 h-4" />
+                                Télécharger
+                            </button>
+                            <button
+                                onClick={onPrint}
+                                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors flex items-center gap-2 text-sm"
+                            >
+                                📄 Imprimer
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Planning principal */}
+                    <div id="schedule-grid" className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
+                        {/* En-tête des jours */}
+                        <div className="grid grid-cols-5 bg-gray-50 border-b border-gray-200">
+                            <div className="p-3 text-center font-semibold text-gray-600 text-sm border-r border-gray-200">
+                                Horaires
+                            </div>
+                            {days.map(day => (
+                                <div key={day} className="p-3 text-center font-semibold text-gray-800 border-r border-gray-200 last:border-r-0">
+                                    {day}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Grille des créneaux */}
+                        <div className="divide-y divide-gray-200">
+                            {timeSlots.map(timeSlot => (
+                                <div key={timeSlot.value} className="grid grid-cols-5 h-20">
+                                    {/* Colonne horaire */}
+                                    <div className="p-3 bg-gray-50 border-r border-gray-200 flex items-center justify-center">
+                                        <span className="text-sm font-medium text-gray-600 bg-white px-2 py-1 rounded shadow-sm">
+                                            {timeSlot.label}
+                                        </span>
+                                    </div>
+
+                                    {/* Colonnes des jours */}
+                                    {days.map(day => {
+                                        const coursesInSlot = coursesByDayAndTime[day][timeSlot.value] || [];
+                                        const coursesToShow = coursesInSlot.filter(c => c.isFirstSlot);
+
+                                        return (
+                                            <div key={day} className="p-1 border-r border-gray-200 last:border-r-0 h-20 flex items-center justify-center">
+                                                {coursesToShow.length > 0 ? (
+                                                    <div className="w-full">
+                                                        {coursesToShow.map(course => (
+                                                            <CourseBlock key={course.id} course={course} />
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-300 text-xs">—</span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Légende */}
+                    <div className="flex items-center justify-center gap-6 text-sm">
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded"></div>
+                            <span className="text-gray-600">Cours particulier</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded"></div>
+                            <span className="text-gray-600">Cours en binôme</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ConflictsList = ({ conflicts }) => {
+            return (
+                <div className="bg-red-900 border border-red-500 rounded-lg p-4 mb-6">
+                    <h3 className="text-lg font-semibold text-red-400 mb-3">
+                        Étudiants non placés ({conflicts.length})
+                    </h3>
+
+                    <div className="space-y-2">
+                        {conflicts.map((conflict, index) => (
+                            <div
+                                key={index}
+                                className="bg-red-800 border border-red-600 rounded p-3"
+                            >
+                                <div className="font-medium text-red-200">
+                                    {conflict.course.studentNames.join(' & ')}
+                                </div>
+                                <div className="text-sm text-red-300 mt-1">
+                                    Raison: {conflict.reason}
+                                </div>
+                                <div className="text-xs text-red-400 mt-1">
+                                    Durée demandée: {conflict.course.duration}min
+                                    {conflict.course.isPair && ' (en binôme)'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const PlanningView = ({ schedule, conflicts, isComplete, isLoading, onSolveSchedule, onExportCSV, onExportICS }) => {
+            return (
+                <div className="p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h1 className="text-3xl font-bold text-dark-text flex items-center gap-2">
+                            <CalendarIcon className="w-8 h-8" />
+                            Planning des Cours
+                        </h1>
+                    </div>
+
+                    <div className="bg-dark-surface border border-dark-border rounded-lg p-4 mb-6">
+                        <div className="flex flex-wrap gap-4 items-center">
+                            <button
+                                onClick={onSolveSchedule}
+                                disabled={isLoading}
+                                className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-500 disabled:to-gray-600 px-8 py-3 rounded-xl flex items-center gap-3 text-white font-medium transition-all shadow-lg hover:shadow-xl transform hover:scale-105 disabled:transform-none"
+                            >
+                                <div className="bg-white/20 p-1 rounded-lg">
+                                    {isLoading ? <LoadingIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
+                                </div>
+                                {isLoading ? 'Calcul en cours...' : 'Générer le Planning'}
+                            </button>
+
+                        </div>
+                    </div>
+
+                    <PlanningStatus schedule={schedule} conflicts={conflicts} isComplete={isComplete} />
+
+                    {schedule.length > 0 && (
+                        <ScheduleGrid
+                            schedule={schedule}
+                            onExportImage={exportScheduleAsImage}
+                            onPrint={printSchedule}
+                        />
+                    )}
+
+                    {conflicts.length > 0 && <ConflictsList conflicts={conflicts} />}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [currentView, setCurrentView] = useState(View.STUDENTS);
+            const [students, setStudents] = useState([]);
+            const [schedule, setSchedule] = useState([]);
+            const [conflicts, setConflicts] = useState([]);
+            const [isComplete, setIsComplete] = useState(false);
+            const [isLoading, setIsLoading] = useState(false);
+
+            useEffect(() => {
+                const initialStudents = parseStudents(initialRawData);
+                setStudents(initialStudents);
+            }, []);
+
+            const handleSolveSchedule = async () => {
+                if (students.length === 0) {
+                    alert('Aucun étudiant à planifier. Ajoutez des étudiants d\'abord.');
+                    return;
+                }
+
+                setIsLoading(true);
+
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    const result = solveSchedule(students);
+
+                    setSchedule(result.schedule);
+                    setConflicts(result.conflicts);
+                    setIsComplete(result.isComplete);
+                    setCurrentView(View.PLANNING);
+
+                } catch (error) {
+                    console.error('Erreur lors de la génération du planning:', error);
+                    alert('Erreur lors de la génération du planning.');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const handleExportCSV = () => {
+                if (schedule.length === 0) {
+                    alert('Aucun planning à exporter.');
+                    return;
+                }
+                exportToCSV(schedule);
+            };
+
+            const handleExportICS = () => {
+                if (schedule.length === 0) {
+                    alert('Aucun planning à exporter.');
+                    return;
+                }
+                exportToICS(schedule);
+            };
+
+            const handleStudentsChange = (newStudents) => {
+                setStudents(newStudents);
+                setSchedule([]);
+                setConflicts([]);
+                setIsComplete(false);
+            };
+
+            return (
+                <div className="min-h-screen bg-dark-bg text-dark-text">
+                    <nav className="bg-dark-surface border-b border-dark-border">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex justify-between h-16">
+                                <div className="flex items-center">
+                                    <h1 className="text-xl font-bold text-dark-text">
+                                        Planificateur de Cours
+                                    </h1>
+                                </div>
+
+                                <div className="flex items-center space-x-4">
+                                    <button
+                                        onClick={() => setCurrentView(View.STUDENTS)}
+                                        className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+                                            currentView === View.STUDENTS
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-slate-400 hover:text-dark-text hover:bg-dark-border'
+                                        }`}
+                                    >
+                                        <UsersIcon className="w-5 h-5" />
+                                        Eleves
+                                        <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
+                                            {students.length}
+                                        </span>
+                                    </button>
+
+                                    <button
+                                        onClick={() => setCurrentView(View.PLANNING)}
+                                        className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+                                            currentView === View.PLANNING
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-slate-400 hover:text-dark-text hover:bg-dark-border'
+                                        }`}
+                                    >
+                                        <CalendarIcon className="w-5 h-5" />
+                                        Planning
+                                        {schedule.length > 0 && (
+                                            <span className={`text-xs px-2 py-1 rounded-full ${
+                                                isComplete ? 'bg-green-500 text-white' : 'bg-yellow-500 text-black'
+                                            }`}>
+                                                {schedule.length}
+                                            </span>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <main className="max-w-7xl mx-auto">
+                        {currentView === View.STUDENTS ? (
+                            <StudentView
+                                students={students}
+                                onStudentsChange={handleStudentsChange}
+                            />
+                        ) : (
+                            <PlanningView
+                                schedule={schedule}
+                                conflicts={conflicts}
+                                isComplete={isComplete}
+                                isLoading={isLoading}
+                                onSolveSchedule={handleSolveSchedule}
+                                onExportCSV={handleExportCSV}
+                                onExportICS={handleExportICS}
+                            />
+                        )}
+                    </main>
+
+                    <footer className="mt-8 py-4 px-6 bg-dark-surface border-t border-dark-border">
+                        <div className="max-w-7xl mx-auto text-center text-sm text-slate-400">
+                            <p></p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        // Rendu de l'application
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
